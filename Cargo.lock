@@ -1488,6 +1488,7 @@ dependencies = [
  "slog-json",
  "slog-term",
  "stacks-common",
+ "thiserror",
 ]
 
 [[package]]

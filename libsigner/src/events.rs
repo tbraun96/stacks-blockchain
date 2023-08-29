@@ -36,7 +36,9 @@ use crate::EventError;
 /// Event structure for newly-arrived StackerDB data
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StackerDBChunksEvent {
+    /// The contract ID for the StackerDB instance
     pub contract_id: QualifiedContractIdentifier,
+    /// The chunk data for newly-modified slots
     pub modified_slots: Vec<StackerDBChunkData>,
 }
 
@@ -44,6 +46,7 @@ pub struct StackerDBChunksEvent {
 /// The caller calls `send()` and the event receiver loop (which lives in a separate thread) will
 /// terminate.
 pub trait EventStopSignaler {
+    /// Send the stop signal
     fn send(&mut self);
 }
 
@@ -100,6 +103,7 @@ pub trait EventReceiver {
     }
 }
 
+/// Event receiver for StackerDB events
 pub struct StackerDBEventReceiver {
     /// contracts we're listening for
     pub stackerdb_contract_ids: Vec<QualifiedContractIdentifier>,
@@ -117,14 +121,13 @@ impl StackerDBEventReceiver {
     /// Make a new StackerDB event receiver, and return both the receiver and the read end of a
     /// channel into which node-received data can be obtained.
     pub fn new(contract_ids: Vec<QualifiedContractIdentifier>) -> StackerDBEventReceiver {
-        let stackerdb_receiver = StackerDBEventReceiver {
+        StackerDBEventReceiver {
             stackerdb_contract_ids: contract_ids,
             sock: None,
             local_addr: None,
             out_channels: vec![],
             stop_signal: Arc::new(AtomicBool::new(false)),
-        };
-        stackerdb_receiver
+        }
     }
 
     /// Do something with the socket
@@ -152,6 +155,7 @@ pub struct StackerDBStopSignaler {
 }
 
 impl StackerDBStopSignaler {
+    /// Make a new stop signaler
     pub fn new(sig: Arc<AtomicBool>, local_addr: SocketAddr) -> StackerDBStopSignaler {
         StackerDBStopSignaler {
             stop_signal: sig,
@@ -165,7 +169,7 @@ impl EventStopSignaler for StackerDBStopSignaler {
         self.stop_signal.store(true, Ordering::SeqCst);
 
         // wake up the thread so the atomicbool can be checked
-        let _ = TcpStream::connect(&self.local_addr);
+        let _ = TcpStream::connect(self.local_addr);
     }
 }
 
@@ -179,7 +183,7 @@ impl EventReceiver for StackerDBEventReceiver {
         let srv = TcpListener::bind(listener)?;
         let bound_addr = srv.local_addr()?;
         self.sock = Some(srv);
-        self.local_addr = Some(bound_addr.clone());
+        self.local_addr = Some(bound_addr);
         Ok(bound_addr)
     }
 
@@ -226,17 +230,17 @@ impl EventReceiver for StackerDBEventReceiver {
     /// Return true on success; false on error.
     /// Returning false terminates the event receiver.
     fn forward_event(&mut self, ev: StackerDBChunksEvent) -> bool {
-        if self.out_channels.len() == 0 {
+        if self.out_channels.is_empty() {
             // nothing to do
             error!("No channels connected to event receiver");
-            return false;
+            false
         } else if self.out_channels.len() == 1 {
             // avoid a clone
             if let Err(e) = self.out_channels[0].send(ev) {
                 error!("Failed to send to signer runloop: {:?}", &e);
                 return false;
             }
-            return true;
+            true
         } else {
             for (i, out_channel) in self.out_channels.iter().enumerate() {
                 if let Err(e) = out_channel.send(ev.clone()) {
@@ -244,7 +248,7 @@ impl EventReceiver for StackerDBEventReceiver {
                     return false;
                 }
             }
-            return true;
+            true
         }
     }
 
@@ -259,7 +263,7 @@ impl EventReceiver for StackerDBEventReceiver {
         if let Some(local_addr) = self.local_addr.as_ref() {
             Ok(StackerDBStopSignaler::new(
                 self.stop_signal.clone(),
-                local_addr.clone(),
+                *local_addr,
             ))
         } else {
             Err(EventError::NotBound)
